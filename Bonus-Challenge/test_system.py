@@ -1,27 +1,18 @@
-# Unit and Integration Tests for Robotic Arm Joint Health Monitoring
-
 import unittest
 import os
 import sys
-
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
-
 from src.safety_interlock import SafetyInterlock
 from src.predictive_wear import JointWearPredictor
 from src.text_log_analyzer import MaintenanceLogAnalyzer
 from src.spoof_detector import SpoofedSensorDetector
 from src.health_monitor import RoboticArmHealthMonitor
-
-
 class TestRoboticArmMonitoringSystem(unittest.TestCase):
-
     def setUp(self):
         self.interlock = SafetyInterlock()
         self.log_analyzer = MaintenanceLogAnalyzer()
         self.spoof_detector = SpoofedSensorDetector()
         self.monitor = RoboticArmHealthMonitor()
-
-    # 1. Immediate Safety Stop
     def test_safety_interlock_torque_limit(self):
         readings = {
             "shoulder": {"torque_nm": 145.0, "temperature_c": 50.0, "vibration_mms": 1.5},
@@ -33,7 +24,6 @@ class TestRoboticArmMonitoringSystem(unittest.TestCase):
         self.assertEqual(details["action"], "EMERGENCY_STOP")
         self.assertEqual(details["joint"], "shoulder")
         self.assertIn("torque 145.0 Nm exceeds", reason)
-
     def test_safety_interlock_temperature_limit(self):
         readings = {
             "shoulder": {"torque_nm": 60.0, "temperature_c": 50.0, "vibration_mms": 1.5},
@@ -44,7 +34,6 @@ class TestRoboticArmMonitoringSystem(unittest.TestCase):
         self.assertTrue(tripped)
         self.assertEqual(details["action"], "EMERGENCY_STOP")
         self.assertEqual(details["joint"], "elbow")
-
     def test_safety_interlock_vibration_limit(self):
         readings = {
             "shoulder": {"torque_nm": 60.0, "temperature_c": 50.0, "vibration_mms": 1.5},
@@ -55,8 +44,6 @@ class TestRoboticArmMonitoringSystem(unittest.TestCase):
         self.assertTrue(tripped)
         self.assertEqual(details["action"], "EMERGENCY_STOP")
         self.assertEqual(details["joint"], "wrist")
-
-    # 2. Predictive Wear Detection
     def test_predictive_model_inference(self):
         predictor = JointWearPredictor()
         # Normal reading
@@ -74,8 +61,6 @@ class TestRoboticArmMonitoringSystem(unittest.TestCase):
         })
         self.assertEqual(worn_res["predicted_state"], "Failure")
         self.assertGreater(worn_res["wear_score"], 0.8)
-
-    # 3. Maintenance Notes Signal
     def test_maintenance_notes_parsing(self):
         arm3_signal = self.log_analyzer.get_signal_for_arm("Arm-3")
         self.assertTrue(arm3_signal["has_notes"])
@@ -91,13 +76,11 @@ class TestRoboticArmMonitoringSystem(unittest.TestCase):
         analysis = self.log_analyzer.analyze_text(text)
         self.assertEqual(analysis["risk_level"], "NONE")
         self.assertTrue(analysis["is_irrelevant"])
-
-    # 4. Spoofed Sensor Defense
     def test_cross_correlation_spoof_detection(self):
         res = self.spoof_detector.evaluate_reading("Arm-7", "shoulder", {
-            "torque_nm": 15.0,       # Falsified low torque
-            "temperature_c": 82.0,   # High heat
-            "vibration_mms": 6.8,    # High vibration
+            "torque_nm": 15.0,      
+            "temperature_c": 82.0,   
+            "vibration_mms": 6.8,    
             "load_kg": 6.0
         })
         self.assertTrue(res["is_spoofed"])
@@ -110,10 +93,7 @@ class TestRoboticArmMonitoringSystem(unittest.TestCase):
         is_frozen, msg = detector.check_frozen_sensor("Arm-X", "elbow")
         self.assertTrue(is_frozen)
         self.assertIn("FROZEN_SIGNAL_ATTACK", msg)
-
-    # 5. All 4 Decisions Reachable
     def test_all_four_decisions_reachable(self):
-        # SAFE
         safe_readings = {
             "shoulder": {"torque_nm": 62.0, "temperature_c": 46.0, "vibration_mms": 1.3, "operating_hours": 1000, "load_kg": 3.0},
             "elbow":    {"torque_nm": 41.0, "temperature_c": 42.0, "vibration_mms": 1.1, "operating_hours": 1000, "load_kg": 3.0},
@@ -121,8 +101,6 @@ class TestRoboticArmMonitoringSystem(unittest.TestCase):
         }
         res_safe = self.monitor.evaluate_arm("Arm-2", safe_readings)
         self.assertEqual(res_safe["final_decision"], "SAFE")
-
-        # MONITOR
         monitor_readings = {
             "shoulder": {"torque_nm": 70.0, "temperature_c": 52.0, "vibration_mms": 1.6, "operating_hours": 4200, "load_kg": 4.5},
             "elbow":    {"torque_nm": 56.8, "temperature_c": 62.4, "vibration_mms": 3.1, "operating_hours": 4500, "load_kg": 4.5},
@@ -130,8 +108,6 @@ class TestRoboticArmMonitoringSystem(unittest.TestCase):
         }
         res_monitor = self.monitor.evaluate_arm("Arm-1", monitor_readings)
         self.assertEqual(res_monitor["final_decision"], "MONITOR")
-
-        # SCHEDULE_MAINTENANCE
         maint_readings = {
             "shoulder": {"torque_nm": 72.0, "temperature_c": 51.0, "vibration_mms": 1.7, "operating_hours": 7500, "load_kg": 5.0},
             "elbow":    {"torque_nm": 48.0, "temperature_c": 49.0, "vibration_mms": 1.4, "operating_hours": 7500, "load_kg": 5.0},
@@ -139,8 +115,6 @@ class TestRoboticArmMonitoringSystem(unittest.TestCase):
         }
         res_maint = self.monitor.evaluate_arm("Arm-3", maint_readings)
         self.assertEqual(res_maint["final_decision"], "SCHEDULE_MAINTENANCE")
-
-        # EMERGENCY_STOP
         stop_readings = {
             "shoulder": {"torque_nm": 155.0, "temperature_c": 50.0, "vibration_mms": 1.5, "operating_hours": 2000, "load_kg": 5.0},
             "elbow":    {"torque_nm": 40.0,  "temperature_c": 45.0, "vibration_mms": 1.0, "operating_hours": 2000, "load_kg": 5.0},
@@ -148,7 +122,5 @@ class TestRoboticArmMonitoringSystem(unittest.TestCase):
         }
         res_stop = self.monitor.evaluate_arm("Arm-6", stop_readings)
         self.assertEqual(res_stop["final_decision"], "EMERGENCY_STOP")
-
-
 if __name__ == "__main__":
     unittest.main()
