@@ -46,15 +46,12 @@ class TestRoboticArmMonitoringSystem(unittest.TestCase):
         self.assertEqual(details["joint"], "wrist")
     def test_predictive_model_inference(self):
         predictor = JointWearPredictor()
-        # Normal reading
         normal_res = predictor.predict_joint("shoulder", {
             "torque_nm": 60.0, "temperature_c": 46.0, "vibration_mms": 1.2,
             "operating_hours": 800, "load_kg": 2.5
         })
         self.assertIn(normal_res["predicted_state"], ["Normal", "Warning"])
         self.assertLess(normal_res["wear_score"], 0.7)
-
-        # Severe wear reading
         worn_res = predictor.predict_joint("shoulder", {
             "torque_nm": 125.0, "temperature_c": 82.0, "vibration_mms": 6.9,
             "operating_hours": 12000, "load_kg": 9.0
@@ -66,11 +63,9 @@ class TestRoboticArmMonitoringSystem(unittest.TestCase):
         self.assertTrue(arm3_signal["has_notes"])
         self.assertEqual(arm3_signal["risk_level"], "CRITICAL")
         self.assertIn("grinding", arm3_signal["matched_keywords"])
-
         arm2_signal = self.log_analyzer.get_signal_for_arm("Arm-2")
         self.assertTrue(arm2_signal["has_notes"])
         self.assertEqual(arm2_signal["risk_level"], "NORMAL")
-
     def test_irrelevant_notes_filtered(self):
         text = "Technician Dave took a lunch break at 12:30. Replaced paper towels in restroom."
         analysis = self.log_analyzer.analyze_text(text)
