@@ -1,16 +1,10 @@
-"""
-Requirement 2: Predictive Wear Detection Model
-Course: 23IF02 System Automation — Bonus Challenge
-
-Trains a supervised machine learning model (RandomForestClassifier) on historical joint
-sensor data to detect premature joint wear before crossing safety thresholds.
-"""
+# Predictive Wear Detection Model
+# Uses RandomForest to predict joint degradation from sensor data
 
 import os
 import joblib
 import numpy as np
 import pandas as pd
-from typing import Dict, Any, Tuple
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import classification_report, accuracy_score
@@ -24,8 +18,9 @@ FEATURE_COLUMNS = [
     "operating_hours", "load_kg"
 ]
 
-def preprocess_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Prepare feature matrix with explicit one-hot encoding for joints."""
+
+def preprocess_features(df):
+    """Encode joint type and extract numeric feature columns."""
     df_feat = pd.DataFrame(index=df.index)
     joint_col = df["joint"].str.lower()
     df_feat["joint_shoulder"] = (joint_col == "shoulder").astype(int)
@@ -37,8 +32,9 @@ def preprocess_features(df: pd.DataFrame) -> pd.DataFrame:
 
     return df_feat[FEATURE_COLUMNS]
 
-def train_predictive_model(data_path: str = DATA_FILE, model_path: str = MODEL_FILE) -> Dict[str, Any]:
-    """Train RandomForest model on historical labeled joint failure dataset."""
+
+def train_predictive_model(data_path=DATA_FILE, model_path=MODEL_FILE):
+    """Train Random Forest model on historical joint failure records."""
     df = pd.read_csv(data_path)
     X = preprocess_features(df)
     y = df["state"]
@@ -70,28 +66,23 @@ def train_predictive_model(data_path: str = DATA_FILE, model_path: str = MODEL_F
         "n_test": len(X_test)
     }
 
-class JointWearPredictor:
-    """Predictive wear evaluation engine using the trained model artifact."""
 
-    def __init__(self, model_path: str = MODEL_FILE):
+class JointWearPredictor:
+    """Loads trained model and evaluates joint wear."""
+
+    def __init__(self, model_path=MODEL_FILE):
         self.model_path = model_path
         self.artifact = None
         self._load_model()
 
     def _load_model(self):
         if not os.path.exists(self.model_path):
-            # Auto-train if model artifact doesn't exist yet
             train_predictive_model(model_path=self.model_path)
         self.artifact = joblib.load(self.model_path)
-        self.model: RandomForestClassifier = self.artifact["model"]
+        self.model = self.artifact["model"]
 
-    def predict_joint(self, joint_name: str, reading: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Predict wear state for a single joint.
-        
-        Returns:
-            dict containing predicted_state, confidence, probabilities, wear_score (0.0 to 1.0)
-        """
+    def predict_joint(self, joint_name, reading):
+        """Predict wear state for an individual joint."""
         row = {
             "joint": joint_name.lower(),
             "torque_nm": reading.get("torque_nm", 50.0),
@@ -108,7 +99,7 @@ class JointWearPredictor:
         classes = list(self.model.classes_)
         prob_dict = {cls: float(prob) for cls, prob in zip(classes, probs)}
 
-        # Continuous wear score synthesis (0.0=pure Normal, 0.5=Warning, 1.0=Failure)
+        # Composite wear score: 0.0 is Normal, 0.5 is Warning, 1.0 is Failure
         p_warn = prob_dict.get("Warning", 0.0)
         p_fail = prob_dict.get("Failure", 0.0)
         wear_score = round(float((p_warn * 0.5) + (p_fail * 1.0)), 3)
@@ -121,11 +112,8 @@ class JointWearPredictor:
             "wear_score": wear_score
         }
 
-    def predict_arm(self, arm_readings: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
-        """
-        Aggregate predictions across all monitored joints of an arm.
-        Returns the highest wear severity across the joints.
-        """
+    def predict_arm(self, arm_readings):
+        """Aggregate predictions across all joints on an arm."""
         joint_results = {}
         worst_score = 0.0
         worst_state = "Normal"
@@ -145,8 +133,9 @@ class JointWearPredictor:
             "joint_details": joint_results
         }
 
+
 if __name__ == "__main__":
-    print("Training Predictive Wear Model...")
+    print("Training predictive wear model...")
     res = train_predictive_model()
-    print(f"Model successfully saved to: {res['model_path']}")
+    print(f"Model saved to: {res['model_path']}")
     print(f"Accuracy: {res['accuracy'] * 100:.2f}%")

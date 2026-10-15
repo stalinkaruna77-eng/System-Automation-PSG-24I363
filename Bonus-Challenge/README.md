@@ -1,160 +1,89 @@
-# Robotic Arm Joint Health Monitoring System
-**Course:** 23IF02 · System Automation — Bonus Challenge  
-**Target Environment:** 6-Axis Robotic Arms (Shoulder, Elbow, Wrist Monitoring)  
+# Bonus Challenge: Robotic Arm Joint Health Monitoring System
+
+This project implements an automated health monitoring system for 6-axis robotic arms. It tracks torque, temperature, and vibration on the shoulder, elbow, and wrist joints, and combines sensor readings with technician maintenance notes to make decisions.
 
 ---
 
-## 1. System Overview & Architecture
+## Written Report
 
-This repository delivers an automated, defense-in-depth condition monitoring and predictive maintenance system for a fleet of 6-axis articulated industrial robotic arms. The system monitors **joint torque** ($\text{Nm}$), **joint temperature** ($^\circ\text{C}$), and **vibration** ($\text{mm/s RMS}$) across the primary load-bearing joints (**Shoulder**, **Elbow**, and **Wrist**).
+### 1. Safety Threshold Rationale for the Immediate-Stop Check
+The immediate safety-stop operates as a hard deterministic check before running any machine learning model or text parsing. If a robotic arm experiences a collision or severe hardware failure, waiting for model inference or relying on an ML probability could lead to physical damage or safety hazards.
 
-### High-Level Decision Flow
-```
-                     [Raw Joint Sensor Readings]
-                                  │
-                                  ▼
-      ┌────────────────────────────────────────────────────────┐
-      │  Stage 1: Hardware Safety Interlock (Deterministic)    │
-      └───────────────────────────┬────────────────────────────┘
-                                  │
-                 Is Hard Threshold Violated?
-                                 / \
-                                /   \
-                        YES    /     \    NO
-                              ▼       ▼
-              [EMERGENCY_STOP]   ┌─────────────────────────────────────────┐
-                                 │ Stage 2: Spoofed-Sensor Defense Engine  │
-                                 └────────────────────┬────────────────────┘
-                                                      │
-                                           Is Spoofing Detected?
-                                                    / \
-                                            YES    /   \    NO
-                                                  /     \
-                          Is Thermal/Vib Severe?         ▼
-                                 / \         ┌───────────────────────────────┐
-                          YES   /   \   NO   │ Stage 3 & 4: Multi-Signal     │
-                               ▼     ▼       │ ML Model & Log Fusion Engine  │
-               [EMERGENCY_STOP]  [SCHEDULE_  └───────────────┬───────────────┘
-                                  MAINTENANCE]                │
-                                                              ▼
-                                            ┌───────────────────────────────────┐
-                                            │ Final Decision Matrix:            │
-                                            │ • Severe Wear / Critical Log      │
-                                            │     -> SCHEDULE_MAINTENANCE       │
-                                            │ • Moderate Wear / Warning Log     │
-                                            │     -> MONITOR                    │
-                                            │ • Nominal Health & Clean Log      │
-                                            │     -> SAFE                       │
-                                            └───────────────────────────────────┘
-```
+I selected the following limits based on typical robotic arm joint sizes and operating loads:
+- **Torque limits (joint-specific):**
+  - **Shoulder: 140 Nm** (Normal operation is around 50–80 Nm. The shoulder carries the entire arm and payload, but anything over 140 Nm indicates a collision, severe payload overload, or mechanical jam).
+  - **Elbow: 95 Nm** (Normal range is 35–55 Nm. An elbow reading above 95 Nm points to gearbox binding or axis seizure).
+  - **Wrist: 45 Nm** (Normal range is 15–25 Nm. The wrist uses smaller harmonic/planetary gears, so exceeding 45 Nm can shear gear teeth or damage the tool flange).
+- **Temperature limit: 85°C across all joints** (Normal running temperature is 40–55°C. At temperatures above 85°C, joint lubricants thin out, seals can degrade, and motor magnets risk demagnetization).
+- **Vibration limit: 7.5 mm/s RMS** (Nominal vibration is 1.0–2.0 mm/s. A reading above 7.5 mm/s indicates dangerous mechanical vibration such as bearing race fracture, loose mounting bolts, or severe gear wear).
+
+### 2. Combining ML Predictions and Maintenance Logs
+The decision engine fuses the quantitative sensor predictions with the qualitative technician notes:
+
+1. **Predictive Wear Model:** A Random Forest classifier trained on labeled historical sensor data (`joint_wear_history.csv`) predicts whether each joint is `Normal`, `Warning`, or `Failure`, along with an overall continuous wear score (0.0 to 1.0).
+2. **Technician Log Analyzer:** A text parsing module scans free-text entries in `maintenance_notes.txt`. It filters out general facility notes (like cleaning benches, paper towel refills, or camera dust cover checks) and searches for mentions of specific arms (e.g. `Arm-1`, `Arm-3`) and joint names. It checks for critical keywords (`grinding`, `leakage`, `backlash`, `excessively hot`) and warning keywords (`clicking`, `warm`, `chatter`), while accounting for common negations (e.g., *"no visible oil leakage"* is treated as normal, not a leak).
+
+**Decision Combination Logic:**
+- If the deterministic safety check trips $\rightarrow$ **`EMERGENCY_STOP`** (immediate priority).
+- If a spoofed sensor is detected $\rightarrow$ **`SCHEDULE_MAINTENANCE`** (or **`EMERGENCY_STOP`** if temperature/vibration indicate danger).
+- If the ML model predicts `Failure` OR the technician logged a `CRITICAL` issue $\rightarrow$ **`SCHEDULE_MAINTENANCE`**.
+- If the ML model predicts `Warning` OR the technician logged a `WARNING` issue $\rightarrow$ **`MONITOR`**.
+- If sensors are nominal and no issues are found in notes $\rightarrow$ **`SAFE`**.
+
+### 3. Spoofed-Sensor Defense Mechanism
+The spoofing defense catches situations where someone sends a fake low torque value to hide a failing joint or bypass safety rules.
+
+- **How it works:**
+  - **Physical Cross-Check (Torque vs. Temp & Vibration):** Mechanical friction inevitably turns into heat and vibration. If a joint reports very high temperature (>65–75°C) and heavy vibration (>4.5 mm/s), but reports a low/normal torque (e.g. 18 Nm on a shoulder), the readings are physically contradictory. The system flags this as a spoofed torque sensor.
+  - **Payload Check:** A robotic arm holding a 7 kg payload at full reach must exert a minimum gravitational holding torque. Reporting near-zero torque under load triggers an anomaly.
+  - **Frozen Signal Check:** Real analog sensors always have small fluctuations. If incoming torque values have zero variance across consecutive readings, it detects a frozen or replayed signal.
+- **What it catches:**
+  - An attacker overriding torque readings to look normal while the arm is overheating or vibrating heavily.
+  - Replay attacks or stuck sensor values transmitting flatline numbers.
+  - Mismatches between commanded payload and reported joint load.
+- **What it would not catch:**
+  - A sophisticated attacker who compromises all sensors simultaneously (torque, temperature, and vibration) and fakes a coordinated, physically plausible set of readings.
+  - Small calibration errors or minor signal drifts that stay within normal operating tolerances.
 
 ---
 
-## 2. Technical Explanation & Design Rationale
-
-### A. Safety Threshold Rationale for Immediate-Stop Check
-The immediate safety check operates deterministically at Priority 0. Per safety standard **ISO 13849-1 (Safety-related parts of control systems)**, software ML inference latency or model hallucinations must never compromise machine emergency stop circuits.
-
-* **Torque Thresholds (Joint-Specific):**
-  * **Shoulder:** **$> 140.0\text{ Nm}$** (Nominal operating range: $50\text{--}80\text{ Nm}$, continuous rated maximum: $120\text{ Nm}$). Exceeding $140\text{ Nm}$ indicates an uncommanded tool collision, catastrophic payload overload, or drive train lockup.
-  * **Elbow:** **$> 95.0\text{ Nm}$** (Nominal: $35\text{--}55\text{ Nm}$, rated maximum: $80\text{ Nm}$). Exceeding $95\text{ Nm}$ indicates mechanical binding or joint cross-axis seizure.
-  * **Wrist:** **$> 45.0\text{ Nm}$** (Nominal: $15\text{--}25\text{ Nm}$, rated maximum: $35\text{ Nm}$). The wrist contains delicate planetary/harmonic reducers; loads above $45\text{ Nm}$ risk stripping teeth or bending end-effector flanges.
-* **Thermal Threshold:** **$> 85.0^\circ\text{C}$ across all joints.** While motor copper windings tolerate Class F temperatures ($155^\circ\text{C}$), synthetic bearing greases and harmonic drive elastomeric seals degrade exponentially above $85^\circ\text{C}$, and high-flux NdFeB permanent magnets risk irreversible thermal demagnetization.
-* **Vibration Threshold:** **$> 7.5\text{ mm/s RMS}$ (ISO 10816-3 Zone D).** In rotating machinery, vibration above $7.5\text{ mm/s}$ corresponds to severe structural damage territory (bearing cage disintegration, rotor imbalance, or loose mounting bolts) requiring immediate shutdown before structural fracture occurs.
-
----
-
-### B. Signal Fusion: Combining ML Predictions & Maintenance Logs
-The decision engine fuses quantitative telemetry and unstructured human intelligence:
-
-1. **Predictive Wear ML Model (`predictive_wear.py`):**
-   * Supervised `RandomForestClassifier` trained on historical failure data (`joint_wear_history.csv`).
-   * Evaluates multivariate degradation signatures across torque, operating hours, load, temperature, and vibration, outputting state probabilities and a continuous wear score ($0.0 \le \text{WearScore} \le 1.0$).
-2. **Unstructured Maintenance Log NLP (`text_log_analyzer.py`):**
-   * Parses free-text shift logs (`maintenance_notes.txt`).
-   * Filters out irrelevant facility notes (e.g., paper towel replenishment, lunch breaks, camera dust cover cleaning).
-   * Contextually extracts target arm IDs, affected joint names, and severity keywords with negation awareness (e.g., recognizing that *"no visible oil leakage"* is benign, whereas *"grease leakage spotted with metallic grinding"* is critical).
-3. **Fusion Matrix:**
-   $$\begin{array}{|c|c|c|}
-   \hline
-   \textbf{Predictive ML State} & \textbf{Technician Log Signal} & \textbf{Final Unified Decision} \\ \hline
-   \text{Any} & \text{Any (Hard Limit Tripped)} & \mathbf{EMERGENCY\_STOP} \\ \hline
-   \text{Any} & \text{Spoofed Sensor Detected} & \mathbf{SCHEDULE\_MAINTENANCE \text{ / } EMERGENCY\_STOP} \\ \hline
-   \text{Failure (Wear} \ge 0.70\text{)} & \text{Any} & \mathbf{SCHEDULE\_MAINTENANCE} \\ \hline
-   \text{Any} & \text{CRITICAL (e.g. grinding/backlash)} & \mathbf{SCHEDULE\_MAINTENANCE} \\ \hline
-   \text{Warning (Wear} \ge 0.35\text{)} & \text{Any} & \mathbf{MONITOR} \\ \hline
-   \text{Any} & \text{WARNING (e.g. clicking/warm)} & \mathbf{MONITOR} \\ \hline
-   \text{Normal} & \text{NORMAL / NONE} & \mathbf{SAFE} \\ \hline
-   \end{array}$$
-
----
-
-### C. Spoofed-Sensor Defense: Mechanism, Capabilities & Limitations
-The defense module (`spoof_detector.py`) guards against hostile or faulty edge transmitters falsifying joint-torque signals to disguise machine degradation.
-
-#### 1. How It Works:
-* **Electro-Mechanical Cross-Correlation Inconsistency:** Mechanical friction dissipates energy into heat and vibration:
-  $$\Delta E_{\text{dissipated}} \propto \tau_{\text{friction}} \cdot \omega \implies \Delta T \uparrow \text{ and } V_{\text{RMS}} \uparrow$$
-  If an adversary fakes a low or nominal torque (e.g., $18\text{ Nm}$) while bearing temperature exceeds $65\text{--}80^\circ\text{C}$ and vibration exceeds $4.5\text{ mm/s RMS}$, the system flags a physical impossibility: heat and acoustic vibration cannot exist without mechanical work or friction torque.
-* **Gravitational Payload Inconsistency:** Newtonian statics dictates a minimum holding torque for a $6\text{--}8\text{ kg}$ tool at extension:
-  $$\tau_{\text{shoulder}} \ge m_{\text{payload}} \cdot g \cdot r_{\text{lever}}$$
-  Reporting $< 25\text{ Nm}$ under a $7.5\text{ kg}$ payload immediately triggers a payload physics violation.
-* **Temporal Frozen Sensor / Replay Detection:** Real strain-gauge sensors exhibit micro-volts of analog-to-digital converter (ADC) quantization noise ($\sigma > 0.005$). Streaming identical static floats yields $\text{Var}(\tau) \to 0$, triggering a frozen signal alert.
-
-#### 2. What Attacks It Catches:
-* **Nominal-Masking Spoofing:** Suppressing reported torque to nominal baseline while the joint suffers mechanical friction or binding.
-* **Zero-Variance / Freeze Replays:** Replaying previously recorded benign sensor frames.
-* **Payload Under-Reporting:** Tampering with load-torque reporting to bypass payload rating limits.
-
-#### 3. What Attacks It Would NOT Catch:
-* **Full Multi-Sensor Synchronized Digital-Twin Spoofing:** If an advanced attacker compromises all three sensor channels (torque, temp, vibration) simultaneously and computes physically coupled synthetic data using a full dynamic simulation model.
-* **Subtle Drift / Low-Amplitude Micro-Biases:** Small offsets ($\le 3\%$) that stay within natural sensor calibration tolerance envelopes.
-
----
-
-## 3. Project Structure & Deliverables
+## Project Structure
 
 ```
 Bonus-Challenge/
-├── README.md                      # Comprehensive design document & submission report
-├── generate_synthetic_data.py     # Generator for labeled historical sensor data
-├── run_pipeline.py                # End-to-end runner demonstrating all 4 reachable outcomes
-├── test_system.py                 # Automated unit & integration test suite (9 passing tests)
+├── README.md                  # Project documentation and report
+├── generate_synthetic_data.py # Generates historical sensor dataset and trains the model
+├── run_pipeline.py            # Demonstrates all 4 reachable states and spoof defense
+├── test_system.py             # Unit tests for all modules
 ├── data/
-│   ├── joint_wear_history.csv     # 120 synthetic historical joint wear records (Normal, Warning, Failure)
-│   └── maintenance_notes.txt      # 9 free-text technician log entries (mix of relevant & irrelevant)
+│   ├── joint_wear_history.csv # 120 historical sensor readings with labels
+│   └── maintenance_notes.txt  # Technician shift log (relevant and irrelevant notes)
 ├── models/
-│   └── joint_wear_model.pkl       # Trained ML predictive wear model artifact
+│   └── joint_wear_model.pkl   # Trained predictive model
 └── src/
-    ├── __init__.py
-    ├── safety_interlock.py        # Req 1: Deterministic zero-latency emergency stop engine
-    ├── predictive_wear.py         # Req 2: ML model training & inference engine
-    ├── text_log_analyzer.py       # Req 3: Free-text NLP log analyzer with negation handling
-    ├── spoof_detector.py          # Req 4: Physics-informed & cross-sensor spoof defense
-    └── health_monitor.py          # Req 5: Multi-signal health decision fusion engine
+    ├── safety_interlock.py    # Hard limit immediate stop check
+    ├── predictive_wear.py     # ML classifier for joint wear
+    ├── text_log_analyzer.py   # Free-text technician log parser
+    ├── spoof_detector.py      # Sensor cross-validation and spoof detection
+    └── health_monitor.py      # Decision logic combining all signals
 ```
 
 ---
 
-## 4. Verification & How to Run
+## How to Run
 
-### Run All Unit and Integration Tests:
-```bash
-python test_system.py
-```
-*Expected Result:*
-```
-Ran 9 tests in 0.38s
-OK
-```
+1. **Run the test suite:**
+   ```bash
+   python test_system.py
+   ```
 
-### Run the Complete End-to-End Pipeline Demonstration:
-```bash
-python run_pipeline.py
-```
-*Demonstrates all four required outcomes:*
-* **Scenario 1:** Nominal Arm-2 $\to$ **`SAFE`**
-* **Scenario 2:** Developing wear on Arm-1 $\to$ **`MONITOR`**
-* **Scenario 3:** Degradation & grinding note on Arm-3 $\to$ **`SCHEDULE_MAINTENANCE`**
-* **Scenario 4:** Hard safety torque spike on Arm-6 $\to$ **`EMERGENCY_STOP`**
-* **Scenario 5:** Defends against spoofed torque attack on Arm-7 $\to$ **`EMERGENCY_STOP`**
+2. **Run the demonstration pipeline:**
+   ```bash
+   python run_pipeline.py
+   ```
+   This will run 5 scenarios demonstrating:
+   - Scenario 1: Arm-2 $\rightarrow$ `SAFE`
+   - Scenario 2: Arm-1 $\rightarrow$ `MONITOR`
+   - Scenario 3: Arm-3 $\rightarrow$ `SCHEDULE_MAINTENANCE`
+   - Scenario 4: Arm-6 $\rightarrow$ `EMERGENCY_STOP` (Safety interlock)
+   - Scenario 5: Arm-7 $\rightarrow$ `EMERGENCY_STOP` (Spoofed torque attack detected)

@@ -1,62 +1,30 @@
-"""
-Requirement 5: Robotic Arm Joint Health Monitoring System (Fusion Engine)
-Course: 23IF02 System Automation — Bonus Challenge
+# Robotic Arm Joint Health Monitoring System - Decision Fusion Engine
+# Merges Safety Interlock, Spoof Defense, ML Predictions, and Technician Notes
 
-Integrates:
-1. Deterministic Safety Interlock (Priority 0)
-2. Spoofed Sensor Defense (Priority 1)
-3. Predictive Wear Machine Learning Model (Priority 2)
-4. Free-Text Technician Maintenance Log NLP (Priority 2)
-
-Produces exactly one final decision per robotic arm:
-- SAFE
-- MONITOR
-- SCHEDULE_MAINTENANCE
-- EMERGENCY_STOP
-"""
-
-from typing import Dict, Any, Optional
 from src.safety_interlock import SafetyInterlock
 from src.predictive_wear import JointWearPredictor
 from src.text_log_analyzer import MaintenanceLogAnalyzer
 from src.spoof_detector import SpoofedSensorDetector
 
-class RoboticArmHealthMonitor:
-    """
-    Central Health Monitoring and Decision Fusion Engine for 6-Axis Robotic Arms.
-    """
 
-    def __init__(
-        self,
-        safety_limits: Optional[Dict[str, Any]] = None,
-        model_path: Optional[str] = None,
-        log_file_path: Optional[str] = None
-    ):
+class RoboticArmHealthMonitor:
+    """Combines sensor checks, ML wear predictions, and shift logs into a final arm decision."""
+
+    def __init__(self, safety_limits=None, model_path=None, log_file_path=None):
         self.safety_interlock = SafetyInterlock(safety_limits)
         self.wear_predictor = JointWearPredictor(model_path) if model_path else JointWearPredictor()
         self.log_analyzer = MaintenanceLogAnalyzer(log_file_path)
         self.spoof_detector = SpoofedSensorDetector()
 
-    def evaluate_arm(self, arm_id: str, arm_readings: Dict[str, Dict[str, Any]]) -> Dict[str, Any]:
+    def evaluate_arm(self, arm_id, arm_readings):
+        """Evaluate an entire arm and return one decision:
+
+        - EMERGENCY_STOP
+        - SCHEDULE_MAINTENANCE
+        - MONITOR
+        - SAFE
         """
-        Evaluate full operational state of a single robotic arm.
-        
-        Args:
-            arm_id: e.g. "Arm-1", "Arm-3"
-            arm_readings: Dict of joint readings, e.g.
-                {
-                    "shoulder": {"torque_nm": 65.0, "temperature_c": 48.0, "vibration_mms": 1.4, ...},
-                    "elbow":    {"torque_nm": 42.0, "temperature_c": 44.0, "vibration_mms": 1.2, ...},
-                    "wrist":    {"torque_nm": 18.0, "temperature_c": 40.0, "vibration_mms": 0.9, ...}
-                }
-                
-        Returns:
-            Structured diagnostic dictionary including final decision, rationale, and component signals.
-        """
-        # =========================================================================
-        # STAGE 1: IMMEDIATE DETERMINISTIC SAFETY STOP (Zero-latency hardware check)
-        # =========================================================================
-        # This check NEVER depends on ML and executes first before any other stage.
+        # 1. Immediate Safety Stop (Hardware-level, deterministic check)
         is_tripped, trip_reason, trip_details = self.safety_interlock.evaluate_arm(arm_readings)
         if is_tripped:
             return {
@@ -71,9 +39,7 @@ class RoboticArmHealthMonitor:
                 "action_required": "IMMEDIATE HARDWARE POWER CUT AND INSPECTION."
             }
 
-        # =========================================================================
-        # STAGE 2: SPOOFED-SENSOR DEFENSE CHECK (Cross-sensor physics & replay test)
-        # =========================================================================
+        # 2. Spoofing Defense Check
         spoof_report = self.spoof_detector.evaluate_arm(arm_id, arm_readings)
         if spoof_report["is_spoofed"]:
             if spoof_report.get("unmasked_danger", False):
@@ -101,19 +67,15 @@ class RoboticArmHealthMonitor:
                     "action_required": "Dispatch technician to inspect encoder/torque sensor wiring and physical calibration."
                 }
 
-        # =========================================================================
-        # STAGE 3: PREDICTIVE ML WEAR MODEL & MAINTENANCE LOG ANALYSIS
-        # =========================================================================
+        # 3. Predictive Model & Log Evaluation
         ml_prediction = self.wear_predictor.predict_arm(arm_readings)
         log_signal = self.log_analyzer.get_signal_for_arm(arm_id)
 
         ml_state = ml_prediction["aggregate_state"]  # "Normal", "Warning", "Failure"
         log_risk = log_signal["risk_level"]          # "CRITICAL", "WARNING", "NORMAL", "NONE"
 
-        # =========================================================================
-        # STAGE 4: DECISION MATRIX / SIGNAL FUSION
-        # =========================================================================
-        # High Wear or Critical Tech Observation -> SCHEDULE_MAINTENANCE
+        # 4. Final Decision Fusion Logic
+        # Severe wear predicted OR critical technician note -> SCHEDULE_MAINTENANCE
         if ml_state == "Failure" or log_risk == "CRITICAL":
             final_decision = "SCHEDULE_MAINTENANCE"
             reasons = []
@@ -124,7 +86,7 @@ class RoboticArmHealthMonitor:
             summary = " | ".join(reasons)
             action = "Dispatch maintenance team to replace degraded joint component before full failure."
 
-        # Moderate Wear or Warning in Tech Log -> MONITOR
+        # Moderate wear OR warning in technician log -> MONITOR
         elif ml_state == "Warning" or log_risk == "WARNING":
             final_decision = "MONITOR"
             reasons = []
@@ -135,7 +97,7 @@ class RoboticArmHealthMonitor:
             summary = " | ".join(reasons)
             action = "Increase sensor logging frequency to 10 Hz; re-evaluate after current batch cycle."
 
-        # All signals Nominal -> SAFE
+        # Everything is healthy and in tolerance -> SAFE
         else:
             final_decision = "SAFE"
             summary = "All joint parameters within nominal limits; ML model reports healthy state; no adverse technician notes."

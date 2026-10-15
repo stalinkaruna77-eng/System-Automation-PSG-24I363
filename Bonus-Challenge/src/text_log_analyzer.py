@@ -1,18 +1,12 @@
-"""
-Requirement 3: Unstructured Maintenance Notes Analyzer
-Course: 23IF02 System Automation — Bonus Challenge
-
-Parses free-text technician logs, filtering out irrelevant facility notes,
-and extracting an independent semantic risk signal per robotic arm and joint.
-"""
+# Maintenance Notes Log Analyzer
+# Extracts risk signals from free-text technician notes
 
 import os
 import re
-from typing import Dict, List, Any, Optional
 
 DEFAULT_LOG_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "maintenance_notes.txt")
 
-# Lexicons for severity extraction
+# Keywords for checking severity of observations
 CRITICAL_KEYWORDS = [
     "urgent", "grinding", "leakage", "grease", "backlash", "seizure",
     "excessively hot", "smoke", "stripped", "failure", "severe", "galling"
@@ -28,22 +22,24 @@ NORMAL_KEYWORDS = [
     "operating well", "no anomalous", "tolerance"
 ]
 
+# General shop floor / facility notes to ignore
 IRRELEVANT_TOPICS = [
     "lunch", "paper towel", "safety signs", "wiped down", "cable ties",
     "dust cover", "vacuumed", "handover checklist", "cabinet", "camera lens"
 ]
 
-class MaintenanceLogAnalyzer:
-    """Free-text log scanner extracting independent health signals for robotic arms."""
 
-    def __init__(self, log_file_path: Optional[str] = None):
+class MaintenanceLogAnalyzer:
+    """Parses shift notes and looks for warnings or faults per arm."""
+
+    def __init__(self, log_file_path=None):
         self.log_file_path = log_file_path or DEFAULT_LOG_PATH
-        self.entries: List[Dict[str, Any]] = []
+        self.entries = []
         if os.path.exists(self.log_file_path):
             self.load_log_file(self.log_file_path)
 
-    def load_log_file(self, path: str):
-        """Parse raw log text into structured entry records."""
+    def load_log_file(self, path):
+        """Read and split log file into separate entries."""
         with open(path, "r", encoding="utf-8") as f:
             content = f.read()
 
@@ -74,27 +70,21 @@ class MaintenanceLogAnalyzer:
                 **analysis
             })
 
-    def analyze_text(self, text: str) -> Dict[str, Any]:
-        """
-        Analyze a single free-text sentence or paragraph.
-        Identifies mentioned arms, joints, relevance, and risk classification.
-        """
+    def analyze_text(self, text):
+        """Analyze a note to find arms, joints, and severity."""
         text_lower = text.lower()
 
-        # Identify mentioned arm IDs (e.g. Arm-1, Arm-2, arm 3)
+        # Extract arm numbers e.g. "Arm-1", "arm 3"
         arms_found = re.findall(r"\barm[\s\-]?(\d+)\b", text_lower)
         arm_ids = [f"Arm-{num}" for num in arms_found]
 
-        # Identify mentioned joints
-        joints_found = []
-        for j in ["shoulder", "elbow", "wrist"]:
-            if j in text_lower:
-                joints_found.append(j)
+        # Extract joints
+        joints_found = [j for j in ["shoulder", "elbow", "wrist"] if j in text_lower]
 
-        # Check for irrelevant facility / housekeeping notes
-        is_irrelevant = any(irr in text_lower for irr in IRRELEVANT_TOPICS) and not arms_found
+        # Check if this is an irrelevant shop housekeeping note
+        is_irrelevant = any(topic in text_lower for topic in IRRELEVANT_TOPICS) and not arms_found
 
-        # Filter out negated patterns like "no leakage", "no visible ... leakage", "no abnormal"
+        # Handle simple negations like "no visible oil leakage" or "no abnormal vibration"
         cleaned_text = re.sub(r"\bno\s+[\w\s]{0,15}(leakage|grease|backlash|grinding|chatter|vibration)", "", text_lower)
 
         matched_crit = [kw for kw in CRITICAL_KEYWORDS if kw in cleaned_text]
@@ -132,10 +122,8 @@ class MaintenanceLogAnalyzer:
             "recommendation": recommendation
         }
 
-    def get_signal_for_arm(self, arm_id: str) -> Dict[str, Any]:
-        """
-        Retrieve the latest, most pertinent maintenance signal for a specific arm.
-        """
+    def get_signal_for_arm(self, arm_id):
+        """Get the most severe log finding for a given arm."""
         relevant_entries = [e for e in self.entries if arm_id.lower() in [a.lower() for a in e.get("arm_ids", [])]]
 
         if not relevant_entries:
@@ -149,7 +137,6 @@ class MaintenanceLogAnalyzer:
                 "target_joints": []
             }
 
-        # Select most severe entry
         severity_rank = {"CRITICAL": 3, "WARNING": 2, "LOW": 1, "NORMAL": 0, "NONE": 0}
         top_entry = max(relevant_entries, key=lambda e: severity_rank.get(e["risk_level"], 0))
 
@@ -164,10 +151,12 @@ class MaintenanceLogAnalyzer:
             "target_joints": top_entry["joints"]
         }
 
+
 if __name__ == "__main__":
     analyzer = MaintenanceLogAnalyzer()
-    print(f"Loaded {len(analyzer.entries)} log entries.\n")
-    for arm in ["Arm-1", "Arm-2", "Arm-3", "Arm-4", "Arm-5"]:
+    print(f"Loaded {len(analyzer.entries)} log entries.")
+    for arm in ["Arm-1", "Arm-2", "Arm-3"]:
         sig = analyzer.get_signal_for_arm(arm)
-        print(f"[{arm}] Risk: {sig['risk_level']} (Score: {sig['risk_score']}) | Keywords: {sig['matched_keywords']}")
-        print(f"      Notes: {sig['summary']}\n")
+        print(f"\nArm: {arm} -> Risk: {sig['risk_level']} (Score: {sig['risk_score']})")
+        print(f"Keywords: {sig['matched_keywords']}")
+        print(f"Notes: {sig['summary']}")

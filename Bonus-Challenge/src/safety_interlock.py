@@ -1,52 +1,32 @@
-"""
-Requirement 1: Immediate Safety Stop Interlock
-Course: 23IF02 System Automation — Bonus Challenge
+# Safety Interlock - Immediate Safety Stop
+# Deterministic checks that run without any ML model
 
-Deterministic, zero-latency safety engine that evaluates raw sensor readings
-independently of any ML model. If any single joint crosses an unambiguous danger
-threshold, an immediate EMERGENCY_STOP is triggered.
-"""
-
-from typing import Dict, Any, Tuple, Optional
-
-# Safety Thresholds based on industrial robotics standards (ISO 10816-3 & joint mechanical ratings)
-# Shoulder carries primary mechanical moment; elbow bears intermediate articulation; wrist has delicate gearing.
+# Hard safety limits for the three main joints
 SAFETY_LIMITS = {
     "torque": {
-        "shoulder": 140.0,  # Nm (rated nominal ~65-110 Nm; >140 Nm indicates severe jam/collision)
-        "elbow": 95.0,      # Nm (rated nominal ~42-75 Nm; >95 Nm indicates binding/gearbox seizure)
-        "wrist": 45.0,      # Nm (rated nominal ~18-32 Nm; >45 Nm indicates tool collision or shear risk)
+        "shoulder": 140.0,  # Nm - max torque for shoulder before collision/jam
+        "elbow": 95.0,      # Nm - max torque for elbow
+        "wrist": 45.0,      # Nm - max torque for wrist gearing
     },
-    "temperature": 85.0,    # °C across all joints (lubricant breakdown & neodymium magnet demag risk)
-    "vibration": 7.5,       # mm/s RMS (ISO 10816-3 Zone D: dangerous vibration, bearing fracture hazard)
+    "temperature": 85.0,    # deg C across all joints (lubricant & motor limit)
+    "vibration": 7.5,       # mm/s RMS - high vibration / mechanical fault
 }
 
-class SafetyInterlock:
-    """
-    Hardware-level safety interlock emulator.
-    Must never rely on ML predictions or network inference.
-    """
 
-    def __init__(self, limits: Optional[Dict[str, Any]] = None):
+class SafetyInterlock:
+    """Hardware safety check that triggers an immediate stop if limits are crossed."""
+
+    def __init__(self, limits=None):
         self.limits = limits or SAFETY_LIMITS
 
-    def evaluate_joint(self, joint_name: str, reading: Dict[str, float]) -> Tuple[bool, Optional[str], Optional[Dict[str, Any]]]:
-        """
-        Evaluate a single joint's raw sensor readings against hard physical limits.
-        
-        Args:
-            joint_name: 'shoulder', 'elbow', or 'wrist'
-            reading: dict containing 'torque_nm', 'temperature_c', 'vibration_mms'
-            
-        Returns:
-            (is_tripped, violation_reason, detail_dict)
-        """
+    def evaluate_joint(self, joint_name, reading):
+        """Check a single joint reading against hard limits."""
         joint_key = joint_name.lower()
         torque = reading.get("torque_nm", 0.0)
         temp = reading.get("temperature_c", 0.0)
         vib = reading.get("vibration_mms", 0.0)
 
-        # 1. Torque threshold check (joint-specific mechanical rating)
+        # 1. Torque check
         max_torque = self.limits["torque"].get(joint_key, 100.0)
         if torque > max_torque:
             details = {
@@ -60,7 +40,7 @@ class SafetyInterlock:
             reason = f"CRITICAL: {joint_key.upper()} torque {torque:.1f} Nm exceeds hard safety limit of {max_torque:.1f} Nm"
             return True, reason, details
 
-        # 2. Temperature threshold check (insulation/lubrication limit)
+        # 2. Temperature check
         max_temp = self.limits["temperature"]
         if temp > max_temp:
             details = {
@@ -74,7 +54,7 @@ class SafetyInterlock:
             reason = f"CRITICAL: {joint_key.upper()} temperature {temp:.1f} °C exceeds thermal ceiling of {max_temp:.1f} °C"
             return True, reason, details
 
-        # 3. Vibration threshold check (ISO 10816-3 Zone D)
+        # 3. Vibration check
         max_vib = self.limits["vibration"]
         if vib > max_vib:
             details = {
@@ -90,11 +70,8 @@ class SafetyInterlock:
 
         return False, None, None
 
-    def evaluate_arm(self, arm_readings: Dict[str, Dict[str, float]]) -> Tuple[bool, Optional[str], Optional[Dict[str, Any]]]:
-        """
-        Check all monitored joints of an arm ('shoulder', 'elbow', 'wrist').
-        Returns immediate trip if ANY single joint reading crosses dangerous limits.
-        """
+    def evaluate_arm(self, arm_readings):
+        """Check all joints of an arm. Trips if ANY joint exceeds limits."""
         for joint, reading in arm_readings.items():
             tripped, reason, details = self.evaluate_joint(joint, reading)
             if tripped:
