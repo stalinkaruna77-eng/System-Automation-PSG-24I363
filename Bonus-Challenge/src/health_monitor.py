@@ -1,30 +1,15 @@
-# Robotic Arm Joint Health Monitoring System - Decision Fusion Engine
-# Merges Safety Interlock, Spoof Defense, ML Predictions, and Technician Notes
-
 from src.safety_interlock import SafetyInterlock
 from src.predictive_wear import JointWearPredictor
 from src.text_log_analyzer import MaintenanceLogAnalyzer
 from src.spoof_detector import SpoofedSensorDetector
 
-
 class RoboticArmHealthMonitor:
-    """Combines sensor checks, ML wear predictions, and shift logs into a final arm decision."""
-
     def __init__(self, safety_limits=None, model_path=None, log_file_path=None):
         self.safety_interlock = SafetyInterlock(safety_limits)
         self.wear_predictor = JointWearPredictor(model_path) if model_path else JointWearPredictor()
         self.log_analyzer = MaintenanceLogAnalyzer(log_file_path)
         self.spoof_detector = SpoofedSensorDetector()
-
     def evaluate_arm(self, arm_id, arm_readings):
-        """Evaluate an entire arm and return one decision:
-
-        - EMERGENCY_STOP
-        - SCHEDULE_MAINTENANCE
-        - MONITOR
-        - SAFE
-        """
-        # 1. Immediate Safety Stop (Hardware-level, deterministic check)
         is_tripped, trip_reason, trip_details = self.safety_interlock.evaluate_arm(arm_readings)
         if is_tripped:
             return {
@@ -38,8 +23,6 @@ class RoboticArmHealthMonitor:
                 "maintenance_log": None,
                 "action_required": "IMMEDIATE HARDWARE POWER CUT AND INSPECTION."
             }
-
-        # 2. Spoofing Defense Check
         spoof_report = self.spoof_detector.evaluate_arm(arm_id, arm_readings)
         if spoof_report["is_spoofed"]:
             if spoof_report.get("unmasked_danger", False):
@@ -67,15 +50,11 @@ class RoboticArmHealthMonitor:
                     "action_required": "Dispatch technician to inspect encoder/torque sensor wiring and physical calibration."
                 }
 
-        # 3. Predictive Model & Log Evaluation
         ml_prediction = self.wear_predictor.predict_arm(arm_readings)
         log_signal = self.log_analyzer.get_signal_for_arm(arm_id)
 
-        ml_state = ml_prediction["aggregate_state"]  # "Normal", "Warning", "Failure"
-        log_risk = log_signal["risk_level"]          # "CRITICAL", "WARNING", "NORMAL", "NONE"
-
-        # 4. Final Decision Fusion Logic
-        # Severe wear predicted OR critical technician note -> SCHEDULE_MAINTENANCE
+        ml_state = ml_prediction["aggregate_state"]  
+        log_risk = log_signal["risk_level"]          
         if ml_state == "Failure" or log_risk == "CRITICAL":
             final_decision = "SCHEDULE_MAINTENANCE"
             reasons = []
@@ -86,7 +65,6 @@ class RoboticArmHealthMonitor:
             summary = " | ".join(reasons)
             action = "Dispatch maintenance team to replace degraded joint component before full failure."
 
-        # Moderate wear OR warning in technician log -> MONITOR
         elif ml_state == "Warning" or log_risk == "WARNING":
             final_decision = "MONITOR"
             reasons = []
@@ -96,13 +74,10 @@ class RoboticArmHealthMonitor:
                 reasons.append(f"Technician logged warning note: '{log_signal['summary']}'")
             summary = " | ".join(reasons)
             action = "Increase sensor logging frequency to 10 Hz; re-evaluate after current batch cycle."
-
-        # Everything is healthy and in tolerance -> SAFE
         else:
             final_decision = "SAFE"
             summary = "All joint parameters within nominal limits; ML model reports healthy state; no adverse technician notes."
             action = "Continue standard automated assembly line operations."
-
         return {
             "arm_id": arm_id,
             "final_decision": final_decision,
