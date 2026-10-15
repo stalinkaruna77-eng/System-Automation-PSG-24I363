@@ -1,27 +1,12 @@
-# Robotic Arm Joint Health Monitoring System - Pipeline Demonstration
-# Runs sample scenarios showing all 4 reachable decisions (SAFE, MONITOR, SCHEDULE_MAINTENANCE, EMERGENCY_STOP)
-# and demonstrates the spoofed-sensor defense.
-
 import sys
 import os
-
-# Add root directory to sys.path
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
-
 from src.health_monitor import RoboticArmHealthMonitor
-
-
 def main():
     print("Initializing Robotic Arm Joint Health Monitoring System...")
     monitor = RoboticArmHealthMonitor()
     print("Modules loaded.\n")
-
-    # -------------------------------------------------------------------------
-    # Scenario 1: Expected Outcome -> SAFE
-    # -------------------------------------------------------------------------
-    print("--------------------------------------------------")
     print("Scenario 1: Normal Operation (Arm-2)")
-    print("--------------------------------------------------")
     arm_2_readings = {
         "shoulder": {"torque_nm": 62.5, "temperature_c": 46.2, "vibration_mms": 1.35, "operating_hours": 1200, "load_kg": 3.0},
         "elbow":    {"torque_nm": 41.0, "temperature_c": 42.5, "vibration_mms": 1.10, "operating_hours": 1200, "load_kg": 3.0},
@@ -33,11 +18,6 @@ def main():
     print(f"Final Decision: [{result_1['final_decision']}]")
     print(f"Summary:        {result_1['summary']}")
     print(f"Action:         {result_1['action_required']}\n")
-
-    # -------------------------------------------------------------------------
-    # Scenario 2: Expected Outcome -> MONITOR
-    # -------------------------------------------------------------------------
-    print("--------------------------------------------------")
     print("Scenario 2: Developing Wear & Minor Note (Arm-1)")
     print("--------------------------------------------------")
     arm_1_readings = {
@@ -51,11 +31,6 @@ def main():
     print(f"Final Decision: [{result_2['final_decision']}]")
     print(f"Summary:        {result_2['summary']}")
     print(f"Action:         {result_2['action_required']}\n")
-
-    # -------------------------------------------------------------------------
-    # Scenario 3: Expected Outcome -> SCHEDULE_MAINTENANCE
-    # -------------------------------------------------------------------------
-    print("--------------------------------------------------")
     print("Scenario 3: Severe Wear & Critical Note (Arm-3)")
     print("--------------------------------------------------")
     arm_3_readings = {
@@ -69,11 +44,6 @@ def main():
     print(f"Final Decision: [{result_3['final_decision']}]")
     print(f"Summary:        {result_3['summary']}")
     print(f"Action:         {result_3['action_required']}\n")
-
-    # -------------------------------------------------------------------------
-    # Scenario 4: Expected Outcome -> EMERGENCY_STOP (Hardware Safety Trip)
-    # -------------------------------------------------------------------------
-    print("--------------------------------------------------")
     print("Scenario 4: Hard Safety Threshold Violation (Arm-6)")
     print("--------------------------------------------------")
     arm_critical_readings = {
@@ -87,11 +57,6 @@ def main():
     print(f"Final Decision: [{result_4['final_decision']}]")
     print(f"Summary:        {result_4['summary']}")
     print(f"Action:         {result_4['action_required']}\n")
-
-    # -------------------------------------------------------------------------
-    # Scenario 5: Spoofed Sensor Attack Caught
-    # -------------------------------------------------------------------------
-    print("--------------------------------------------------")
     print("Scenario 5: Spoofed Sensor Defense (Arm-7)")
     print("--------------------------------------------------")
     print("Simulated attack: Adversary fakes shoulder torque as 18.0 Nm to look normal,")
@@ -106,10 +71,6 @@ def main():
     print(f"Final Decision: [{result_5['final_decision']}]")
     print(f"Summary:        {result_5['summary']}")
     print(f"Action:         {result_5['action_required']}\n")
-
-    # -------------------------------------------------------------------------
-    # Summary of reachable decisions
-    # -------------------------------------------------------------------------
     all_decisions = {
         result_1["final_decision"],
         result_2["final_decision"],
@@ -119,7 +80,5 @@ def main():
     print("--------------------------------------------------")
     print(f"Verified reachable decisions: {all_decisions}")
     print("All 4 states (SAFE, MONITOR, SCHEDULE_MAINTENANCE, EMERGENCY_STOP) verified successfully.")
-
-
 if __name__ == "__main__":
     main()
